@@ -311,8 +311,8 @@ class Preview extends Disposable {
     const first = buffer[0];
     let base: number = 0xff;
     let fileType = 'jpeg';
-    // let v = first ^ base;
-    base = findBase(first) || base;
+    let fileHead = findBase([buffer[0], buffer[1]]);
+    base = fileHead[0];
     switch (base) {
       case FILE_TYPE_HEAD_BASE.TIFF:
         fileType = 'tiff';
@@ -400,13 +400,14 @@ function escapeAttribute(value: string | vscode.Uri): string {
   return value.toString().replace(/"/g, '&quot;');
 }
 
-function findBase(biteValue: number) {
-  const validBase = [0xFF, 0x47, 0X89, 0x49];
-  return validBase.find(_ => {
+function findBase(fileHeader: [number, number]) {
+  type fileHead = [number, number];
+  const validBase: Array<[number, number]> = [[0xFF, 0xd8], [0x47, 0x49], [0X89, 0x50], [0x49, 0x49]];
+  return validBase.find((_: fileHead) => {
     // 尝试获取key
-    let key = biteValue ^ _;
-    // 用获取到的key验证解密出来的值
-    const val = biteValue ^ key;
-    return val === _;
-  });
+    let key = fileHeader[0] ^ _[0];
+    // 用获取到的key验证第二位，如果第二位正确，那么就没问题了
+    const secondBite = fileHeader[1] ^ key;
+    return _[1] === secondBite;
+  }) || validBase[0];
 }
