@@ -4,16 +4,36 @@ import { Disposable } from './Disposable';
 import BinarySizeStatusBarEntry from './BinarySizeStatusBar';
 import DimensionStatusBarEntry from './DimensionStatusBar';
 import CreateTimeStatusBarEntry from './CreateTimeStatusBar';
+import FileNameStatusBarEntry from './FileNameStatusBar';
 
 interface ImageContent {
   base64: string
   buffer: Buffer
 }
 
+const enum FILE_TYPE_HEADER_IDENTIFY {
+  JPEG = 0xEE,
+  GIF = 1,
+  PNG = 0x98,
+  TIFF = 0x5C,
+}
+const enum FILE_TYPE_HEAD_BASE {
+  JPEG = 0xFF,
+  GIF = 0x47,
+  PNG = 0X89,
+  TIFF = 0x49,
+}
+
 export default class WxDatFilePreviewerManage implements vscode.CustomReadonlyEditorProvider {
   private static viewType = 'wxDatFile.viewer';
-  static register(context: vscode.ExtensionContext, binarySizeStatusBarEntry: BinarySizeStatusBarEntry, dimensionStatusBarEntry: DimensionStatusBarEntry, createTimeStatusBarEntry: CreateTimeStatusBarEntry) {
-    const previewer = new WxDatFilePreviewerManage(context.extensionUri, binarySizeStatusBarEntry, dimensionStatusBarEntry, createTimeStatusBarEntry);
+  static register(
+    context: vscode.ExtensionContext,
+    binarySizeStatusBarEntry: BinarySizeStatusBarEntry,
+    dimensionStatusBarEntry: DimensionStatusBarEntry,
+    createTimeStatusBarEntry: CreateTimeStatusBarEntry,
+    filenameStatusBarEntry: FileNameStatusBarEntry
+  ) {
+    const previewer = new WxDatFilePreviewerManage(context.extensionUri, binarySizeStatusBarEntry, dimensionStatusBarEntry, createTimeStatusBarEntry, filenameStatusBarEntry);
     return vscode.window.registerCustomEditorProvider(this.viewType, previewer, {
       webviewOptions: {
         retainContextWhenHidden: true,
@@ -28,6 +48,7 @@ export default class WxDatFilePreviewerManage implements vscode.CustomReadonlyEd
     private readonly binarySizeStatusBarEntry: BinarySizeStatusBarEntry,
     private readonly dimensionStatusBarEntry: DimensionStatusBarEntry,
     private readonly createTimeStatusBarEntry: CreateTimeStatusBarEntry,
+    private readonly filenameStatusBarEntry: FileNameStatusBarEntry,
   ) { }
   public openCustomDocument(uri: vscode.Uri) {
     return { uri, dispose: () => { } };
@@ -36,7 +57,7 @@ export default class WxDatFilePreviewerManage implements vscode.CustomReadonlyEd
     document: vscode.CustomDocument,
     webview: vscode.WebviewPanel
   ): Promise<void> {
-    const preview = new Preview(this.extensionRoot, document.uri, webview, this.binarySizeStatusBarEntry, this.dimensionStatusBarEntry, this.createTimeStatusBarEntry);
+    const preview = new Preview(this.extensionRoot, document.uri, webview, this.binarySizeStatusBarEntry, this.dimensionStatusBarEntry, this.createTimeStatusBarEntry, this.filenameStatusBarEntry);
     this._previews.add(preview);
     this.setActivePreview(preview);
     // webview销毁删除当前预览
@@ -77,9 +98,11 @@ class Preview extends Disposable {
   private _imageSize: string | undefined;
   private _imageBinarySize: number | undefined;
   private _createTime: number | string | undefined;
+  private _filename: string | undefined;
   private readonly emptyDataUri = `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR42gEFAPr/AP///wAI/AL+Sr4t6gAAAABJRU5ErkJggg==`;
   private resourceRoot: vscode.Uri;
   private _saveTargetUri: vscode.Uri | undefined;
+  private siblingsFiles: [string, vscode.FileType][];
   constructor(
     private readonly extensionRoot: vscode.Uri,
     private resource: vscode.Uri,
@@ -87,9 +110,12 @@ class Preview extends Disposable {
     private readonly binarySizeStatusBarEntry: BinarySizeStatusBarEntry,
     private readonly dimensionStatusBarEntry: DimensionStatusBarEntry,
     private readonly createTimeStatusBarEntry: CreateTimeStatusBarEntry,
+    private readonly filenameStatusBarEntry: FileNameStatusBarEntry
   ) {
     super();
     // 通过
+    this.siblingsFiles = [];
+    this._filename = resource.fsPath;
     const resourceRoot = resource.with({
       path: resource.path.replace(/\/[^\/]+?\.\w+$/, '/'),
     });
@@ -136,6 +162,7 @@ class Preview extends Disposable {
         this.binarySizeStatusBarEntry.hide(this.id);
         this.dimensionStatusBarEntry.hide(this.id);
         this.createTimeStatusBarEntry.hide(this.id);
+        this.filenameStatusBarEntry.hide(this.id);
       }
       this._previewState = PreviewState.Disposed;
     }));
@@ -166,6 +193,7 @@ class Preview extends Disposable {
       this._imageBinarySize = res.size;
       this._createTime = `${dayjs(res.ctime).format(`YYYY-MM-DD HH:mm:ss`)}`;
     });
+    this._filename = this.resource.fsPath;
     // 当前编辑器激活态
     if (this.webviewEditor.active) {
       this._previewState = PreviewState.Active;
@@ -173,6 +201,7 @@ class Preview extends Disposable {
       this.binarySizeStatusBarEntry.show(this.id, this._imageBinarySize as number);
       this.dimensionStatusBarEntry.show(this.id, `${this._imageSize}`);
       this.createTimeStatusBarEntry.show(this.id, this._createTime as string);
+      this.filenameStatusBarEntry.show(this.id, `${this._filename}`);
     }
     else {
       // 当前预览状态激活
@@ -185,8 +214,10 @@ class Preview extends Disposable {
   private async render() {
     // 只更新Visible和Active状态的视图
     if (this._previewState !== PreviewState.Disposed) {
+      this.webviewEditor.webview.postMessage({ type: 'loading', value: {} });
       const webviewHtml = await this.getWebviewContents();
       this.webviewEditor.webview.html = webviewHtml;
+      this.webviewEditor.webview.postMessage({ type: 'loading-success', value: {} });
     }
   }
   private async getWebviewContents() {
@@ -213,8 +244,7 @@ class Preview extends Disposable {
   <meta id="image-preview-settings" data-settings="${escapeAttribute(JSON.stringify(settings))}">
   <script src="${escapeAttribute(this.extensionResource('/media/statics/iconfont.js'))}" nonce="${nonce}"></script>
 </head>
-<body class="container image scale-to-fit loading">
-  <div class="loading-indicator"></div>
+<body class="container image scale-to-fit">
   <div class="image-wrapper" id="imageWrapper">
     <div class="action-container">
       <div class="icon-wrapper__left">
@@ -247,6 +277,7 @@ class Preview extends Disposable {
         <p>当前文件解析出错，您可以<a href="#" class="open-file-link" id="openFile">&nbsp;&nbsp;打开源文件</a></p>
       </div>
     </div>
+    <div class="loading" id="loading"><div class="lds-dual-ring"></div></div>
   </div>
 	<script src="${escapeAttribute(this.extensionResource('/media/main.js'))}" nonce="${nonce}"></script>
 </body>
@@ -278,11 +309,25 @@ class Preview extends Disposable {
     const fileData = await vscode.workspace.fs.readFile(resource);
     const buffer: Buffer = Buffer.from(fileData);
     const first = buffer[0];
-    const base: number = 0xFF;
-    const v = first ^ base;
-    const content = buffer.map(_ => _ ^ v);
+    let base: number = 0xff;
+    let fileType = 'jpeg';
+    // let v = first ^ base;
+    base = findBase(first) || base;
+    switch (base) {
+      case FILE_TYPE_HEAD_BASE.TIFF:
+        fileType = 'tiff';
+        break;
+      case FILE_TYPE_HEAD_BASE.GIF:
+        fileType = 'gif';
+        break;
+      case FILE_TYPE_HEAD_BASE.PNG:
+        fileType = 'png';
+        break;
+    }
+    const key = first ^ base;
+    const content = buffer.map(_ => _ ^ key);
     if (type === 'base64') {
-      return `data:image/png;base64,${Buffer.from(content).toString('base64')}`;
+      return `data:image/${fileType};base64,${Buffer.from(content).toString('base64')}`;
     }
     else {
       return content;
@@ -290,7 +335,14 @@ class Preview extends Disposable {
   }
   // 获取当前文件所在文件夹下所有同类型资源
   private async getSiblingsFile(resource: vscode.Uri): Promise<Array<vscode.Uri>> {
-    let files = await vscode.workspace.fs.readDirectory(resource);
+    let files: [string, vscode.FileType][] = [];
+    if (this.siblingsFiles && this.siblingsFiles.length) {
+      files = this.siblingsFiles;
+    }
+    else {
+      files = await vscode.workspace.fs.readDirectory(resource);
+      this.siblingsFiles = files;
+    }
     return files.filter(_ => {
         const tmp = _[0].split('.');
         return tmp[tmp.length - 1] === 'dat';
@@ -346,4 +398,15 @@ class Preview extends Disposable {
 
 function escapeAttribute(value: string | vscode.Uri): string {
   return value.toString().replace(/"/g, '&quot;');
+}
+
+function findBase(biteValue: number) {
+  const validBase = [0xFF, 0x47, 0X89, 0x49];
+  return validBase.find(_ => {
+    // 尝试获取key
+    let key = biteValue ^ _;
+    // 用获取到的key验证解密出来的值
+    const val = biteValue ^ key;
+    return val === _;
+  });
 }

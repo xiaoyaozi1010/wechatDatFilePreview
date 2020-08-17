@@ -7,14 +7,20 @@
         return JSON.parse(data);
       }
     }
-
     throw new Error('数据解析出错');
   }
+  function toggleLoading(show) {
+    const loadingEl = document.getElementById('loading');
+    if (show) {
+      loadingEl.style.display = 'flex';
+    }
+    else {
+      loadingEl.style.display = 'none';
+    }
+  }
   const settings = getSettings();
-  const isMac = settings.isMac;
   const vscode = acquireVsCodeApi();
   let hasLoadedImage = false;
-  const isActive = false;
   const container = document.getElementById('imageWrapper');
   const image = document.createElement('img');
   const nextBtn = document.getElementById('next');
@@ -65,4 +71,15 @@
   image.addEventListener('error', (e) => {
     errorContainer.style.display = 'block';
   });
+  window.addEventListener('message', ({ data }) => {
+    switch (data.type) {
+      case 'loading':
+        toggleLoading(true);
+        break;
+      case 'loading-success':
+        toggleLoading(false);
+        break;
+    }
+  });
 })();
+ 
