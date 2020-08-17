@@ -2,7 +2,7 @@
 	"name": "wechat-dat-file-viewer",
 	"displayName": "wechat .dat file viewer",
 	"description": "wechat .dat file preview, 微信.dat缓存图片预览工具",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"publisher": "zhiyong-lizy",
 	"engines": {
 		"vscode": "^1.47.0"
